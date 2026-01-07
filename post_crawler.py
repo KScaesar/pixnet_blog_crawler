@@ -109,7 +109,7 @@ class PostCrawler:
                 except Exception:
                     # Fallback for slow pages/CDN: relax to DOMContentLoaded with a bit more time.
                     await page.goto(url, wait_until="domcontentloaded", timeout=goto_timeout_ms)
-                await page.wait_for_timeout(500)
+                await page.wait_for_timeout(2000)
                 html = await page.content()
                 await browser.close()
                 return html
@@ -137,7 +137,7 @@ class PostCrawler:
 
 
 async def main():
-    metadata_many = read_metadata("posts2.json")
+    metadata_many = read_metadata("posts.json")
 
     crawler = PostCrawler(
         selectors=PostCrawlerSelectors(
@@ -154,7 +154,7 @@ async def main():
         # 這裡會等到 crawler.crawl 產出一個 Post 後，才執行迴圈內容
         # 實作了「處理一個、儲存一個」的串流模式
         async for post in crawler.crawl(metadata_many):
-            download_post(post_many=[post], target_dir="backup", download_images=False)
+            download_post(post_many=[post], target_dir="backup", download_images=True)
             count += 1
             print(f"[{count}] Saved: {post.metadata.title}")
         

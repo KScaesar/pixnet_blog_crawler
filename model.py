@@ -76,48 +76,8 @@ class Post:
         link_many: list[tuple[str, str]] = []
         image_many: list[tuple[str, str]] = []
 
-        def append_lines(node: Node) -> None:
-            """
-            Append lines extracted from this node.
-
-            Priority:
-            1) All <img> descendants (emit all, keep order inside this node)
-            2) First link (without nested image)
-            3) Text (stripped)
-            4) Fallback: recurse into children
-            """
-            images = node.css("img")
-            if images:
-                for img in images:
-                    src = img.attributes.get("src")
-                    caption = img.attributes.get("title") or img.attributes.get("alt") or ""
-                    suffix = "".join(random.choices(string.ascii_letters + string.digits, k=4))
-                    body = cls.ensure_ext(caption or f"no_alt_{suffix}", src)
-                    if src:
-                        image_many.append((src, body))
-                    content_many.append(Line(kind=LineKind.IMAGE, body=body, url=src))
-                return
-
-            link_node = node.css_first("a")
-            if link_node and not link_node.css_first("img"):
-                href = link_node.attributes.get("href")
-                text = node.text(strip=True) or link_node.text(strip=True)
-                body = text or href or ""
-                if href:
-                    link_many.append((href, body))
-                content_many.append(Line(kind=LineKind.LINK, body=body, url=href))
-                return
-
-            text = node.text(strip=True)
-            if text:
-                content_many.append(Line(kind=LineKind.TEXT, body=text, url=None))
-                return
-
-            for child in cls.iter_direct_children(node):
-                append_lines(child)
-
         for child in cls.iter_direct_children(root):
-            append_lines(child)
+            cls._append_lines(child, content_many, link_many, image_many)
 
         if enable_fallback:
             cls._apply_fallback_strategies(
@@ -128,6 +88,59 @@ class Post:
             )
 
         return cls(metadata=metadata, content_many=content_many, link_many=link_many, image_many=image_many)
+
+    @classmethod
+    def _append_lines(
+        cls,
+        node: Node,
+        content_many: list[Line],
+        link_many: list[tuple[str, str]],
+        image_many: list[tuple[str, str]],
+    ) -> None:
+        """
+        Append lines extracted from this node using recursive traversal.
+        """
+        # 1. Text Node
+        if node.tag == "-text":
+            text = node.text(strip=True)
+            if text:
+                content_many.append(Line(kind=LineKind.TEXT, body=text, url=None))
+            return
+
+        # 2. Line Break
+        if node.tag == "br":
+            # Append empty text line to force newline
+            content_many.append(Line(kind=LineKind.TEXT, body="", url=None))
+            return
+
+        # 3. Image
+        if node.tag == "img":
+            src = node.attributes.get("src")
+            caption = node.attributes.get("title") or node.attributes.get("alt") or ""
+            suffix = "".join(random.choices(string.ascii_letters + string.digits, k=4))
+            body = cls.ensure_ext(caption or f"no_alt_{suffix}", src)
+            if src:
+                image_many.append((src, body))
+            content_many.append(Line(kind=LineKind.IMAGE, body=body, url=src))
+            return
+
+        # 4. Link (Atomic if text-only)
+        if node.tag == "a":
+            # If it has NO nested images, treat as Link Line
+            if not node.css_first("img"):
+                href = node.attributes.get("href")
+                text = node.text(strip=True)
+                body = text or href or ""
+                if href:
+                    link_many.append((href, body))
+                if body:
+                    content_many.append(Line(kind=LineKind.LINK, body=body, url=href))
+                return
+            # If it has images, recurse to handle them individually
+
+        # 5. Recurse (Container or unhandled tag)
+        for child in cls.iter_direct_children(node):
+            cls._append_lines(child, content_many, link_many, image_many)
 
     @staticmethod
     def iter_direct_children(node: Node):
