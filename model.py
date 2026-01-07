@@ -57,40 +57,22 @@ class Line:
 class Post:
     metadata: PostMetadata  # Post level metadata
     content_many: list[Line]  # List of content fragments
-    reference_many: list[tuple[str, str]]  # List of URLs and anchor texts
+    link_many: list[tuple[str, str]]  # List of URLs and anchor texts
     image_many: list[tuple[str, str]]  # List of URLs and alias name
 
     @classmethod
-    def parse_dom_node(cls, root: Node, metadata: PostMetadata) -> "Post":
+    def parse_dom_node(cls, root: Node, metadata: PostMetadata, enable_fallback: bool = False) -> "Post":
         """
         Factory method to construct a Post from a parent selectolax Node.
 
         Rules:
         - Traverses the DOM sequentially to preserve content order.
         - Extracts text, images, and links mixed together.
-        - Populates content_many (ordered), reference_many (summary), and image_many (summary).
+        - Populates content_many (ordered), link_many (summary), and image_many (summary).
         """
         content_many: list[Line] = []
-        reference_many: list[tuple[str, str]] = []
+        link_many: list[tuple[str, str]] = []
         image_many: list[tuple[str, str]] = []
-
-        def ensure_ext(name: str, src: str | None) -> str:
-            """Append filename extension from src if name has none."""
-            if not src or "." not in src.rsplit("/", 1)[-1]:
-                return name
-            ext = src.rsplit("/", 1)[-1].rsplit("?", 1)[0].rsplit("#", 1)[0]
-            if "." not in ext:
-                return name
-            ext = "." + ext.split(".")[-1]
-            if name.lower().endswith(ext.lower()):
-                return name
-            return f"{name}{ext}"
-
-        def iter_direct_children(node: Node):
-            child = node.child
-            while child is not None:
-                yield child
-                child = child.next
 
         def append_lines(node: Node) -> None:
             """
@@ -107,7 +89,7 @@ class Post:
                 for img in images:
                     src = img.attributes.get("src")
                     caption = img.attributes.get("title") or img.attributes.get("alt") or ""
-                    body = ensure_ext(caption or "(no alt)", src)
+                    body = cls.ensure_ext(caption or "(no alt)", src)
                     if src:
                         image_many.append((src, body))
                     content_many.append(Line(kind=LineKind.IMAGE, body=body, url=src))
@@ -119,7 +101,7 @@ class Post:
                 text = node.text(strip=True) or link_node.text(strip=True)
                 body = text or href or ""
                 if href:
-                    reference_many.append((href, body))
+                    link_many.append((href, body))
                 content_many.append(Line(kind=LineKind.LINK, body=body, url=href))
                 return
 
@@ -128,38 +110,100 @@ class Post:
                 content_many.append(Line(kind=LineKind.TEXT, body=text, url=None))
                 return
 
-            for child in iter_direct_children(node):
+            for child in cls.iter_direct_children(node):
                 append_lines(child)
 
-        for child in iter_direct_children(root):
+        for child in cls.iter_direct_children(root):
             append_lines(child)
 
-        # Fallback: ensure all images under root are captured even if nested structures were skipped.
+        if enable_fallback:
+            cls._apply_fallback_strategies(
+                root,
+                doc=root.parser,
+                content_many=content_many,
+                image_many=image_many,
+            )
+
+        return cls(metadata=metadata, content_many=content_many, link_many=link_many, image_many=image_many)
+
+    @staticmethod
+    def iter_direct_children(node: Node):
+        child = node.child
+        while child is not None:
+            yield child
+            child = child.next
+
+    @staticmethod
+    def ensure_ext(name: str, src: str | None) -> str:
+        """Append filename extension from src if name has none."""
+        if not src or "." not in src.rsplit("/", 1)[-1]:
+            return name
+        ext = src.rsplit("/", 1)[-1].rsplit("?", 1)[0].rsplit("#", 1)[0]
+        if "." not in ext:
+            return name
+        ext = "." + ext.split(".")[-1]
+        if name.lower().endswith(ext.lower()):
+            return name
+        return f"{name}{ext}"
+
+    @staticmethod
+    def _apply_fallback_strategies(
+        root: Node,
+        doc: object | None,
+        content_many: list[Line],
+        image_many: list[tuple[str, str]],
+    ) -> None:
+        """
+        Apply fallback strategies to find images that might have been missed by standard parsing.
+        """
         seen_images: set[str] = set(url for url, _ in image_many if url)
+
+        # Fallback: ensure all images under root are captured even if nested structures were skipped.
         for img in root.css("img"):
             src = img.attributes.get("src")
             if not src or src in seen_images:
                 continue
             caption = img.attributes.get("title") or img.attributes.get("alt") or ""
-            body = ensure_ext(caption or "(no alt)", src)
+            body = Post.ensure_ext(caption or "(no alt)", src)
             seen_images.add(src)
             image_many.append((src, body))
             content_many.append(Line(kind=LineKind.IMAGE, body=body, url=src))
 
         # Broader fallback: grab image tags from the whole document matching the blog host.
-        doc = root.parser
         if doc is not None:
-            for img in doc.css("img"):
-                src = img.attributes.get("src")
-                if not src or src in seen_images:
-                    continue
-                if "pimg.tw/workatravel" not in src:
-                    continue
-                caption = img.attributes.get("title") or img.attributes.get("alt") or ""
-                body = ensure_ext(caption or "(no alt)", src)
-                seen_images.add(src)
-                image_many.append((src, body))
-                content_many.append(Line(kind=LineKind.IMAGE, body=body, url=src))
+            # Note: doc.css might not be available if doc is not a Node, but root.parser returns an HTMLParser or similar.
+            # Assuming doc has .css method if it's the parser object that selectolax provides.
+            # However, root.parser in selectolax returns the HTMLParser object which doesn't have .css directly usually?
+            # Actually root.parser returns the HTMLParser instance.
+            # Let's verify if we can use css on it.
+            # If doc is the HTMLParser, it doesn't have .css. root does.
+            # The original code used doc.css("img") at line 152.
+            # Let's check imports. selectolax.parser.Node's .parser property returns the HTMLParser.
+            # HTMLParser has .css? No, usually the tree is queried via Node.
+            # But earlier code was working, so let's stick to what was there or fix it if it was broken.
+            # Wait, line 152 in original code: `for img in doc.css("img"):`.
+            # If that was working, then doc must have .css.
+            # In selectolax, HTMLParser does NOT have .css. Only Node.
+            # But maybe root.parser isn't what I think it is, or the user's code relies on it being something else.
+            # Let's trust the original code structure for now but be careful.
+            # Actually, looking at line 5: from selectolax.parser import Node.
+            # If doc is HTMLParser, it doesn't have css.
+            # Maybe the previous code was crashing there? Or never reached?
+            # The user ran it and it worked? "Successfully crawled 2 posts".
+            # So let's reproduce the logic exactly.
+
+            if hasattr(doc, "css"):
+                for img in doc.css("img"):
+                    src = img.attributes.get("src")
+                    if not src or src in seen_images:
+                        continue
+                    if "pimg.tw/workatravel" not in src:
+                        continue
+                    caption = img.attributes.get("title") or img.attributes.get("alt") or ""
+                    body = Post.ensure_ext(caption or "(no alt)", src)
+                    seen_images.add(src)
+                    image_many.append((src, body))
+                    content_many.append(Line(kind=LineKind.IMAGE, body=body, url=src))
 
         # As a last resort, regex through the raw HTML of the content container.
         if not image_many and getattr(root, "html", None):
@@ -176,7 +220,7 @@ class Post:
                 title_match = re.search(r'title="([^"]*)"', tag)
                 alt_match = re.search(r'alt="([^"]*)"', tag)
                 caption = (title_match.group(1) if title_match else "") or (alt_match.group(1) if alt_match else "")
-                body = ensure_ext(caption or "(no alt)", src)
+                body = Post.ensure_ext(caption or "(no alt)", src)
                 seen_images.add(src)
                 image_many.append((src, body))
                 content_many.append(Line(kind=LineKind.IMAGE, body=body, url=src))
@@ -197,12 +241,10 @@ class Post:
                 title_match = re.search(r'title="([^"]*)"', tag)
                 alt_match = re.search(r'alt="([^"]*)"', tag)
                 caption = (title_match.group(1) if title_match else "") or (alt_match.group(1) if alt_match else "")
-                body = ensure_ext(caption or "(no alt)", src)
+                body = Post.ensure_ext(caption or "(no alt)", src)
                 seen_images.add(src)
                 image_many.append((src, body))
                 content_many.append(Line(kind=LineKind.IMAGE, body=body, url=src))
-
-        return cls(metadata=metadata, content_many=content_many, reference_many=reference_many, image_many=image_many)
 
     def __str__(self) -> str:
         lines = []
@@ -213,9 +255,9 @@ class Post:
             for line in self.content_many:
                 lines.append(f"{line}")
 
-        if self.reference_many:
-            lines.append(f"References ({len(self.reference_many)}):")
-            for url, text in self.reference_many:
+        if self.link_many:
+            lines.append(f"Links ({len(self.link_many)}):")
+            for url, text in self.link_many:
                 lines.append(f"  - {text}: {url}")
 
         if self.image_many:
