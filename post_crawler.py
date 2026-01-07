@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime
+from collections.abc import AsyncGenerator
 
 import httpx
 from playwright.async_api import async_playwright
@@ -41,18 +42,32 @@ class PostCrawler:
         self._sem = asyncio.Semaphore(concurrency)
         self._timeout = httpx.Timeout(timeout=timeout_s)
 
-    async def crawl(self, post_metadata_many: list[PostMetadata]) -> list[Post]:
+    async def crawl(self, post_metadata_many: list[PostMetadata]) -> AsyncGenerator[Post, None]:
         """
-        Crawl multiple posts concurrently.
+        Crawl multiple posts concurrently and yield them as they finish.
         """
         async with httpx.AsyncClient(
             headers=self._headers,
             follow_redirects=True,
             timeout=self._timeout,
         ) as client:
-            tasks = [self._fetch_post(client, meta) for meta in post_metadata_many]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            return [post for post in results if isinstance(post, Post)]
+            tasks = [
+                self._fetch_post(client, meta) 
+                for meta in post_metadata_many
+            ]
+            
+            # 使用 asyncio.as_completed 取得一個迭代器，它會依照「完成順序」產出結果。
+            # 這樣可以與 Generator 搭配，實現「串流 (Streaming)」處理：
+            # 只要有任何一個爬蟲任務完成，就立即 yield 回傳該 Post 物件，
+            # 讓後端 (如 main 函式) 可以即時寫入檔案並釋放記憶體，
+            # 避免必須等待全部上千筆任務完成導致記憶體積壓。
+            for coro in asyncio.as_completed(tasks):
+                try:
+                    post = await coro
+                    if isinstance(post, Post):
+                        yield post
+                except Exception as e:
+                    logger.error(f"Unexpected error in crawl task: {e}")
 
     async def _fetch_post(self, client: httpx.AsyncClient, metadata: PostMetadata) -> Post | None:
         """
@@ -94,20 +109,6 @@ class PostCrawler:
                 except Exception:
                     # Fallback for slow pages/CDN: relax to DOMContentLoaded with a bit more time.
                     await page.goto(url, wait_until="domcontentloaded", timeout=goto_timeout_ms)
-                try:
-                    # Construct a comma-separated selector string to wait for ANY of the candidates
-                    combined_selector = ", ".join(self._selectors.content_container)
-                    if combined_selector:
-                        await page.wait_for_selector(combined_selector, timeout=5000)
-                        # Try to wait for images inside any of the containers
-                        # This is a bit tricky with comma separation, but we can try
-                        # f"{self._selectors.content_container} img" was the old logic.
-                        # Now we want: "sel1 img, sel2 img"
-                        img_selector = ", ".join(f"{s} img" for s in self._selectors.content_container)
-                        await page.wait_for_selector(img_selector, timeout=5000)
-                except Exception:
-                    # It's fine if images are not immediately present; we still capture the DOM.
-                    pass
                 await page.wait_for_timeout(500)
                 html = await page.content()
                 await browser.close()
@@ -148,13 +149,19 @@ async def main():
     )
 
     if metadata_many:
-        posts = await crawler.crawl(metadata_many)
-
-        if posts:
-            download_post(post_many=posts, target_dir="backup", download_images=False)
-            print(f"Successfully crawled and saved {len(posts)} posts")
-        else:
+        count = 0
+        # 使用 async for 逐一接收並處理完成的 Post
+        # 這裡會等到 crawler.crawl 產出一個 Post 後，才執行迴圈內容
+        # 實作了「處理一個、儲存一個」的串流模式
+        async for post in crawler.crawl(metadata_many):
+            download_post(post_many=[post], target_dir="backup", download_images=False)
+            count += 1
+            print(f"[{count}] Saved: {post.metadata.title}")
+        
+        if count == 0:
             print("No posts were successfully crawled.")
+        else:
+            print(f"Successfully finished crawling {count} posts.")
 
 
 if __name__ == "__main__":
