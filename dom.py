@@ -74,18 +74,11 @@ def extract_datetime(node, selector: str) -> datetime | None:
                 # Try Chinese format: 12月06週六202517:12
                 # Pattern: <month>月<day>週<weekday><year><hour>:<minute>
                 # Note: All dates from this crawler are in Taipei timezone (UTC+8)
-                match = re.match(r'(\d+)月(\d+)週.(\d{4})(\d{2}):(\d{2})', dt_str)
+                match = re.match(r"(\d+)月(\d+)週.(\d{4})(\d{2}):(\d{2})", dt_str)
                 if match:
                     month, day, year, hour, minute = match.groups()
                     try:
-                        return datetime(
-                            year=int(year),
-                            month=int(month),
-                            day=int(day),
-                            hour=int(hour),
-                            minute=int(minute),
-                            tzinfo=TAIPEI_TZ
-                        )
+                        return datetime(year=int(year), month=int(month), day=int(day), hour=int(hour), minute=int(minute), tzinfo=TAIPEI_TZ)
                     except ValueError:
                         return None
                 return None
