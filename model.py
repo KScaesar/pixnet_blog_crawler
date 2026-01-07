@@ -94,45 +94,59 @@ class Post:
 
         def append_lines(node: Node) -> None:
             """
-            Append lines extracted from this node.
-
-            Priority:
-            1) All <img> descendants (emit all, keep order inside this node)
-            2) First link (without nested image)
-            3) Text (stripped)
-            4) Fallback: recurse into children
+            Append lines extracted from this node using recursive traversal.
+            This ensures that block-level elements (divs, spans with display:block implied)
+            are treated as separate lines, rather than concatenating all text.
             """
-            images = node.css("img")
-            if images:
-                for img in images:
-                    src = img.attributes.get("src")
-                    caption = img.attributes.get("title") or img.attributes.get("alt") or ""
-                    body = ensure_ext(caption or "(no alt)", src)
-                    if src:
-                        image_many.append((src, body))
-                    content_many.append(Line(kind=LineKind.IMAGE, body=body, url=src))
+            tag = node.tag
+
+            # 1. Handle Text Nodes
+            if tag == '-text':
+                text = node.text(strip=True)
+                if text:
+                    content_many.append(Line(kind=LineKind.TEXT, body=text, url=None))
                 return
 
-            link_node = node.css_first("a")
-            if link_node and not link_node.css_first("img"):
-                href = link_node.attributes.get("href")
-                text = node.text(strip=True) or link_node.text(strip=True)
-                body = text or href or ""
-                if href:
-                    reference_many.append((href, body))
-                content_many.append(Line(kind=LineKind.LINK, body=body, url=href))
+            # 2. Handle Images
+            if tag == 'img':
+                src = node.attributes.get("src")
+                caption = node.attributes.get("title") or node.attributes.get("alt") or ""
+                body = ensure_ext(caption or "(no alt)", src)
+                if src:
+                    image_many.append((src, body))
+                content_many.append(Line(kind=LineKind.IMAGE, body=body, url=src))
                 return
 
-            text = node.text(strip=True)
-            if text:
-                content_many.append(Line(kind=LineKind.TEXT, body=text, url=None))
-                return
+            # 3. Handle Links (Atomic unit if it contains text/simple content)
+            if tag == 'a':
+                # Check if it contains an image -> if so, we prefer to extract the image
+                # recursively or handle it here.
+                # If we recurse, the text inside will be TEXT and image inside will be IMAGE.
+                # However, we want to capture the Link URL.
+                # If we treat 'a' as atomic LINK, we lose internal structure (like img).
 
+                # Compromise: Check if it has an image.
+                if node.css_first("img"):
+                    # Recurse to find the image(s)
+                    for child in iter_direct_children(node):
+                        append_lines(child)
+                    return
+                else:
+                    # Treat as atomic Text Link
+                    href = node.attributes.get("href")
+                    text = node.text(strip=True)
+                    body = text or href or ""
+                    if href:
+                        reference_many.append((href, body))
+                    content_many.append(Line(kind=LineKind.LINK, body=body, url=href))
+                    return
+
+            # 4. Fallback: Recurse into children
             for child in iter_direct_children(node):
                 append_lines(child)
 
-        for child in iter_direct_children(root):
-            append_lines(child)
+        # Start traversal
+        append_lines(root)
 
         # Fallback: ensure all images under root are captured even if nested structures were skipped.
         seen_images: set[str] = set(url for url, _ in image_many if url)
