@@ -26,4 +26,18 @@ All code must use strict Python type hints to ensure clarity and catch potential
 - **Async First:** Use `asyncio` and `httpx.AsyncClient` for network operations.
 - **Data Models:** Use `pydantic` or `dataclasses` for structured data.
 
-## Example
+### Linting & Formatting
+Use [ruff](https://github.com/astral-sh/ruff) for fast linting and formatting.
+
+- Check and auto-fix issues:
+  ```bash
+  ruff check --fix .
+  ```
+- Format code:
+  ```bash
+  ruff format .
+  ```
+- Combined command:
+  ```bash
+  ruff check --fix . && ruff format .
+  ```
