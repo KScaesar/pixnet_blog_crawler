@@ -1,26 +1,38 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True, kw_only=True)
 class PostMetadata:
-    index: int
-    published_at: str | None
-    title: str | None
+    idx: int = field(default=0, init=False)
+    published_at: datetime
     url: str
-
-
-@dataclass(frozen=True, slots=True)
-class PostMetadataSelectors:
     title: str
-    published_at: str
+
+    def __str__(self) -> str:
+        return f"[{self.idx:05d}]: {self.published_at} - {self.url} - {self.title}"
 
 
-@dataclass(frozen=True, slots=True)
-class PostMetadataResult:
-    url: str
-    post: PostMetadata | None
-    ok: bool
-    status_code: int | None
-    error: str | None
-    final_url: str | None = None
-    elapsed_ms: int | None = None
+class PageCrawlerSelectors:
+    """
+    CSS selectors for extracting post metadata from paginated pages.
+
+    Attributes:
+        post_container: Selector for each post container on the page
+        title: Selector for post title (relative to post_container)
+        published_at: Selector for published date (relative to post_container)
+        post_url: Selector for post URL link (relative to post_container)
+    """
+
+    def __init__(
+        self,
+        *,
+        post_container: str,
+        title: str,
+        published_at: str,
+        post_url: str,
+    ) -> None:
+        self.post_container = post_container
+        self.title = title
+        self.published_at = published_at
+        self.post_url = post_url
