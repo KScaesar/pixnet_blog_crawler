@@ -11,7 +11,7 @@ from selectolax.parser import Node
 
 @dataclass(slots=True, kw_only=True)
 class PostMetadata:
-    idx: int = field(default=0, init=False)  # Index of the post
+    idx: int = field(default=0)  # Index of the post
     published_at: datetime  # Published timestamp
     url: str  # URL of the post
     title: str  # Title of the post

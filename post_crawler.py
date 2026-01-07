@@ -7,7 +7,7 @@ from playwright.async_api import async_playwright
 from selectolax.parser import HTMLParser
 
 from model import Post, PostCrawlerSelectors, PostMetadata
-from store import download_post
+from store import download_post, read_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -122,12 +122,12 @@ class PostCrawler:
         """
         tree = HTMLParser(html)
         content_node = None
-        
+
         for selector in self._selectors.content_container:
             content_node = tree.css_first(selector)
             if content_node:
                 break
-        
+
         if not content_node:
             logger.error(f"Could not find content for {metadata}")
             return None
@@ -136,30 +136,25 @@ class PostCrawler:
 
 
 async def main():
-    # Initial post URLs provided by user
-    urls = ["https://workatravel.pixnet.net/blog/posts/5063201814", "https://workatravel.pixnet.net/blog/posts/5061634077", "https://workatravel.pixnet.net/blog/posts/5071682496"]
-
-    # Create dummy metadata for testing (since we don't have titles/dates from page crawler yet)
-    # In a real scenario, these would come from PageCrawler
-    metadatas = [PostMetadata(url=url, title=f"Test Post {i}", published_at=datetime.now()) for i, url in enumerate(urls)]
+    metadata_many = read_metadata("posts2.json")
 
     crawler = PostCrawler(
         selectors=PostCrawlerSelectors(
-            content_container=["#article-content-inner"]  # Typical Pixnet content selectors fallback
+            content_container=[
+                "#article-content-inner",
+            ]
         ),
-        concurrency=10,
+        concurrency=5,
     )
 
-    posts = await crawler.crawl(metadatas)
+    if metadata_many:
+        posts = await crawler.crawl(metadata_many)
 
-    if posts:
-        download_post(posts, "backup")
-        print(f"Successfully crawled {len(posts)} posts\n")
-        for post in posts:
-            print(post)
-            print("=" * 80)  # Extra newline between posts
-    else:
-        print("No posts were crawled.")
+        if posts:
+            download_post(post_many=posts, target_dir="backup", download_images=False)
+            print(f"Successfully crawled and saved {len(posts)} posts")
+        else:
+            print("No posts were successfully crawled.")
 
 
 if __name__ == "__main__":
