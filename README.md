@@ -12,6 +12,17 @@
 
 ## 使用方式
 
+### 安裝相依套件與瀏覽器
+
+本專案使用 `uv` 進行套件管理。除了安裝 python 套件外，還需要安裝 Playwright 所需的瀏覽器二進位檔案。
+
+```bash
+uv sync                 # 安裝 Python 套件
+uv run playwright install  # 安裝瀏覽器 (必須透過 uv run 執行)
+```
+
+> **注意**: 直接執行 `playwright install` 可能會失敗，因為 `playwright` 指令位於虛擬環境中，必須加上 `uv run`。
+
 ### 步驟 1: 爬取文章列表
 
 ```bash
