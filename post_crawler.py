@@ -7,6 +7,7 @@ from playwright.async_api import async_playwright
 from selectolax.parser import HTMLParser
 
 from model import Post, PostCrawlerSelectors, PostMetadata
+from store import download_post
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +51,8 @@ class PostCrawler:
             timeout=self._timeout,
         ) as client:
             tasks = [self._fetch_post(client, meta) for meta in post_metadata_many]
-            results = await asyncio.gather(*tasks)
-            return [post for post in results if post is not None]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            return [post for post in results if isinstance(post, Post)]
 
     async def _fetch_post(self, client: httpx.AsyncClient, metadata: PostMetadata) -> Post | None:
         """
@@ -94,8 +95,16 @@ class PostCrawler:
                     # Fallback for slow pages/CDN: relax to DOMContentLoaded with a bit more time.
                     await page.goto(url, wait_until="domcontentloaded", timeout=goto_timeout_ms)
                 try:
-                    await page.wait_for_selector(f"{self._selectors.content_container}", timeout=5000)
-                    await page.wait_for_selector(f"{self._selectors.content_container} img", timeout=5000)
+                    # Construct a comma-separated selector string to wait for ANY of the candidates
+                    combined_selector = ", ".join(self._selectors.content_container)
+                    if combined_selector:
+                        await page.wait_for_selector(combined_selector, timeout=5000)
+                        # Try to wait for images inside any of the containers
+                        # This is a bit tricky with comma separation, but we can try
+                        # f"{self._selectors.content_container} img" was the old logic.
+                        # Now we want: "sel1 img, sel2 img"
+                        img_selector = ", ".join(f"{s} img" for s in self._selectors.content_container)
+                        await page.wait_for_selector(img_selector, timeout=5000)
                 except Exception:
                     # It's fine if images are not immediately present; we still capture the DOM.
                     pass
@@ -112,10 +121,15 @@ class PostCrawler:
         Parse post HTML using model's factory method.
         """
         tree = HTMLParser(html)
-        content_node = tree.css_first(self._selectors.content_container)
-
+        content_node = None
+        
+        for selector in self._selectors.content_container:
+            content_node = tree.css_first(selector)
+            if content_node:
+                break
+        
         if not content_node:
-            logger.error(f"Could not find content container for {metadata.url}")
+            logger.error(f"Could not find content for {metadata}")
             return None
 
         return Post.parse_dom_node(content_node, metadata)
@@ -123,7 +137,7 @@ class PostCrawler:
 
 async def main():
     # Initial post URLs provided by user
-    urls = ["https://workatravel.pixnet.net/blog/posts/5063201814", "https://workatravel.pixnet.net/blog/posts/5071682496"]
+    urls = ["https://workatravel.pixnet.net/blog/posts/5063201814", "https://workatravel.pixnet.net/blog/posts/5061634077", "https://workatravel.pixnet.net/blog/posts/5071682496"]
 
     # Create dummy metadata for testing (since we don't have titles/dates from page crawler yet)
     # In a real scenario, these would come from PageCrawler
@@ -131,7 +145,7 @@ async def main():
 
     crawler = PostCrawler(
         selectors=PostCrawlerSelectors(
-            content_container="#article-content-inner"  # Typical Pixnet content selector
+            content_container=["#article-content-inner"]  # Typical Pixnet content selectors fallback
         ),
         concurrency=10,
     )
@@ -139,7 +153,7 @@ async def main():
     posts = await crawler.crawl(metadatas)
 
     if posts:
-        # write_jsonl(posts, "posts_detail.jsonl")
+        download_post(posts, "backup")
         print(f"Successfully crawled {len(posts)} posts\n")
         for post in posts:
             print(post)

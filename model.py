@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
 
+import random
+import string
 from selectolax.parser import Node
 
 # page_crawler.py
@@ -46,7 +48,7 @@ class Line:
     def __str__(self) -> str:
         match self.kind:
             case LineKind.IMAGE:
-                return f"[IMAGE] {self.body or '(no alt)'} -> {self.url}"
+                return f"[IMAGE] {self.body} -> {self.url}"
             case LineKind.LINK:
                 return f"[LINK] {self.body} -> {self.url}"
             case LineKind.TEXT:
@@ -89,7 +91,8 @@ class Post:
                 for img in images:
                     src = img.attributes.get("src")
                     caption = img.attributes.get("title") or img.attributes.get("alt") or ""
-                    body = cls.ensure_ext(caption or "(no alt)", src)
+                    suffix = "".join(random.choices(string.ascii_letters + string.digits, k=4))
+                    body = cls.ensure_ext(caption or f"no_alt_{suffix}", src)
                     if src:
                         image_many.append((src, body))
                     content_many.append(Line(kind=LineKind.IMAGE, body=body, url=src))
@@ -270,4 +273,4 @@ class Post:
 
 @dataclass(slots=True, kw_only=True)
 class PostCrawlerSelectors:
-    content_container: str  # CSS selector for the main content body
+    content_container: list[str]  # List of CSS selectors for the main content body, tried in order

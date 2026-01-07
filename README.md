@@ -34,10 +34,10 @@ uv run page_crawler.py
 ### 步驟 2: 爬取文章內容
 
 ```bash
-uv run post_crawler.py  # 尚未實作
+uv run post_crawler.py 2> download_error.log
 ```
 
-讀取 `posts.json`,爬取每篇文章的完整內容
+讀取 `posts.json`，爬取每篇文章的完整內容，並將錯誤訊息（如內容抓取失敗）記錄到 `download_error.log`。
 
 ### 適應不同 HTML 格式
 
