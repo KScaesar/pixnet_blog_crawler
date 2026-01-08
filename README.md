@@ -4,35 +4,25 @@
 
 ## outline
 
-- [pixnet\_blog\_crawler](#pixnet_blog_crawler)
-  - [outline](#outline)
   - [架構說明](#架構說明)
-  - [使用方式](#使用方式)
-    - [安裝相依套件與瀏覽器](#安裝相依套件與瀏覽器)
+  - [使用步驟](#使用步驟)
     - [步驟 1: 爬取文章列表](#步驟-1-爬取文章列表)
     - [步驟 2: 爬取文章內容](#步驟-2-爬取文章內容)
+    - [步驟 3: LLM 重新整理文章](#步驟-3-llm-重新整理文章)
+  - [安裝與配置](#安裝與配置)
+    - [安裝](#安裝)
     - [適應不同 HTML 格式](#適應不同-html-格式)
 
 ## 架構說明
 
 - **`page_crawler.py`** - 並發爬取分頁,自動重試,排序索引
-- **`post_crawler.py`** - 讀取文章列表,爬取每篇文章完整內容 (尚未實作)
+- **`post_crawler.py`** - 讀取文章列表,爬取每篇文章完整內容
+- **`llm_rewrite_post.sh`** - 批次處理 Markdown 文件,使用 LLM 重整格式
 - **`model.py`** - 定義 `PostMetadata` 與 `PageCrawlerSelectors`
 - **`dom.py`** - 提取文字、日期、URL (支援多格式日期解析)
 - **`store.py`** - JSON Lines 緩衝寫入
 
-## 使用方式
-
-### 安裝相依套件與瀏覽器
-
-本專案使用 `uv` 進行套件管理。除了安裝 python 套件外，還需要安裝 Playwright 所需的瀏覽器二進位檔案。
-
-```bash
-uv sync                 # 安裝 Python 套件
-uv run playwright install  # 安裝瀏覽器 (必須透過 uv run 執行)
-```
-
-> **注意**: 直接執行 `playwright install` 可能會失敗，因為 `playwright` 指令位於虛擬環境中，必須加上 `uv run`。
+## 使用步驟
 
 ### 步驟 1: 爬取文章列表
 
@@ -48,7 +38,34 @@ uv run page_crawler.py
 uv run post_crawler.py 2> download_error.log
 ```
 
-讀取 `posts.json`，爬取每篇文章的完整內容，並將錯誤訊息（如內容抓取失敗）記錄到 `download_error.log`。
+讀取 `posts.json`，爬取每篇文章的完整內容，並將錯誤訊息記錄到 `download_error.log`。
+
+### 步驟 3: LLM 重新整理文章
+
+爬蟲抓取的文章格式可能雜亂（斷行、排版問題），使用 LLM 將其重新整理為結構化的 Markdown 格式。
+
+```bash
+TARGET_DIR=./Backup bash llm_rewrite_post.sh 2> rewrite_error.log
+```
+
+**功能說明：**
+- 自動找出所有 `.md` 文件，生成 `*_v2.md` 重整版本
+- 使用 LLM 修正標點、合併段落、建立標題結構
+- 速率限制：0.9 RPS（符合 API 的 60 RPM 限制）
+- 異步處理：背景執行任務，提高處理效率
+
+## 安裝與配置
+
+### 安裝
+
+本專案使用 `uv` 進行套件管理。除了安裝 python 套件外，還需要安裝 Playwright 所需的瀏覽器二進位檔案。
+
+```bash
+uv sync                    # 安裝 Python 套件
+uv run playwright install  # 安裝瀏覽器 (必須透過 uv run 執行)
+```
+
+**注意**: 直接執行 `playwright install` 可能會失敗，因為 `playwright` 指令位於虛擬環境中，必須加上 `uv run`。
 
 ### 適應不同 HTML 格式
 
@@ -74,3 +91,5 @@ async def main():
 2. 按 F12 開啟開發者工具
 3. 使用元素選取器 (Inspect) 找到對應的 HTML 元素
 4. 複製或撰寫對應的 CSS 選擇器
+
+
