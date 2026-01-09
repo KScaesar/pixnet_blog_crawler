@@ -4,6 +4,8 @@
 
 ## outline
 
+- [pixnet\_blog\_crawler](#pixnet_blog_crawler)
+  - [outline](#outline)
   - [架構說明](#架構說明)
   - [使用步驟](#使用步驟)
     - [步驟 1: 爬取文章列表](#步驟-1-爬取文章列表)
@@ -45,13 +47,12 @@ uv run post_crawler.py 2> download_error.log
 爬蟲抓取的文章格式可能雜亂（斷行、排版問題），使用 LLM 將其重新整理為結構化的 Markdown 格式。
 
 ```bash
-TARGET_DIR=./Backup bash llm_rewrite_post.sh 2> rewrite_error.log
+TARGET_DIR=./backup bash llm_rewrite_post.sh 2> rewrite_error.log
 ```
 
 **功能說明：**
 - 自動找出所有 `.md` 文件，生成 `*_v2.md` 重整版本
 - 使用 LLM 修正標點、合併段落、建立標題結構
-- 速率限制：0.9 RPS（符合 API 的 60 RPM 限制）
 - 異步處理：背景執行任務，提高處理效率
 
 ## 安裝與配置
